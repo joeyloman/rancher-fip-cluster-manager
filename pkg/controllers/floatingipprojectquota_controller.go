@@ -184,7 +184,7 @@ func (r *FloatingIPProjectQuotaReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{}, err
 	}
 
-	if err := HandleNetworkConfigMap(ctx, r.Client, downstreamClient, cluster.Spec.DisplayName, r.AppNamespace); err != nil {
+	if err := HandleNetworkConfigMap(ctx, r.Client, downstreamClient, cluster.Spec.DisplayName, r.Config.RancherFipLBControllerNamespace); err != nil {
 		log.WithError(err).Error("failed to handle network configmap")
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 	}

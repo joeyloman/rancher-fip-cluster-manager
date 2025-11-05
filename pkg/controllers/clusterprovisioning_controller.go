@@ -63,8 +63,6 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	log.Infof("Reconciling cluster: %s [%s]", cluster.Name, cluster.Spec.DisplayName)
 
-	log.Infof("DEBUG Labels [%+v]", cluster.Labels)
-
 	// Filter out clusters that should not be reconciled
 	if cluster.Name == "local" ||
 		cluster.Labels["provider.cattle.io"] == "harvester" ||
@@ -399,7 +397,7 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 	}
 
-	if err := HandleNetworkConfigMap(ctx, r.Client, downstreamClient, harvesterCluster.Spec.DisplayName, r.AppNamespace); err != nil {
+	if err := HandleNetworkConfigMap(ctx, r.Client, downstreamClient, harvesterCluster.Spec.DisplayName, r.Config.RancherFipLBControllerNamespace); err != nil {
 		log.WithError(err).Error("failed to handle network configmap")
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 	}
