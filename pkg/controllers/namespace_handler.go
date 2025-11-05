@@ -3,8 +3,10 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/sirupsen/logrus"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,6 +81,30 @@ func LabelNamespaceWithProjectID(ctx context.Context, c client.Client, namespace
 		return err
 	}
 	log.Infof("Successfully updated namespace %s with project-name label", namespace.Name)
+
+	// Restart the rancher-fip-lb-controller deployment to pick up the new label
+	deploymentName := "rancher-fip-lb-controller"
+	deployment := &appsv1.Deployment{}
+	if err := c.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: namespaceName}, deployment); err != nil {
+		if errors.IsNotFound(err) {
+			log.Warnf("Deployment %s/%s not found, skipping restart (may not be deployed yet)", namespaceName, deploymentName)
+			return nil
+		}
+		log.WithError(err).Errorf("unable to fetch deployment %s/%s for restart", namespaceName, deploymentName)
+		return err
+	}
+
+	// Add restart annotation to trigger rollout restart
+	if deployment.Spec.Template.Annotations == nil {
+		deployment.Spec.Template.Annotations = make(map[string]string)
+	}
+	deployment.Spec.Template.Annotations["rancher.k8s.binbash.org/lb-controller-restarted-at"] = time.Now().Format(time.RFC3339)
+
+	if err := c.Update(ctx, deployment); err != nil {
+		log.WithError(err).Errorf("unable to restart deployment %s/%s", namespaceName, deploymentName)
+		return err
+	}
+	log.Infof("Successfully restarted deployment %s/%s to pick up new namespace label", namespaceName, deploymentName)
 
 	return nil
 }
