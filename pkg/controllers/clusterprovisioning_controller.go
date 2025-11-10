@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	managementv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
@@ -41,6 +42,8 @@ type ClusterProvisioningReconciler struct {
 	AppNamespace string
 	// NewDownstreamClientFunc is a function that returns a new downstream client.
 	NewDownstreamClientFunc func(config *rest.Config) (client.Client, error)
+	// previousLabels stores the previous "rancher-fip" label values for UPDATE event comparison
+	previousLabels sync.Map
 }
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -61,16 +64,57 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Infof("Reconciling cluster: %s [%s]", cluster.Name, cluster.Spec.DisplayName)
-
 	// Filter out clusters that should not be reconciled
 	if cluster.Name == "local" ||
 		cluster.Labels["provider.cattle.io"] == "harvester" ||
 		cluster.Labels["rancher-fip"] != "enabled" {
-		log.Infof("Skipping reconciliation for cluster: %s [%s]", cluster.Name, cluster.Spec.DisplayName)
+		log.Debugf("Skipping reconciliation for cluster: %s [%s]", cluster.Name, cluster.Spec.DisplayName)
 
 		return ctrl.Result{}, nil
 	}
+
+	// Check if this is an UPDATE event by checking if we have a previous label value stored
+	clusterKey := req.NamespacedName.String()
+	previousLabelValue, isUpdate := r.previousLabels.Load(clusterKey)
+
+	if isUpdate {
+		// This is an UPDATE event - check the "rancher-fip" label change
+		oldLabelValue, _ := previousLabelValue.(string)
+		newLabelValue := cluster.Labels["rancher-fip"]
+
+		// Check if old object had the label
+		oldHadLabel := oldLabelValue != ""
+
+		// Check if new object has the label
+		newHasLabel := newLabelValue != ""
+
+		// Continue only if:
+		// 1. Old object had the label and new object has a different value, OR
+		// 2. Old object didn't have the label but new object does
+		shouldContinue := false
+		if oldHadLabel && newHasLabel && oldLabelValue != newLabelValue {
+			// Label value changed
+			shouldContinue = true
+			log.Debugf("rancher-fip label value changed from '%s' to '%s' for cluster %s [%s]", oldLabelValue, newLabelValue, cluster.Name, cluster.Spec.DisplayName)
+		} else if !oldHadLabel && newHasLabel {
+			// Label was added
+			shouldContinue = true
+			log.Debugf("rancher-fip label was added with value '%s' for cluster %s [%s]", newLabelValue, cluster.Name, cluster.Spec.DisplayName)
+		}
+
+		// Update the stored label value for future comparisons
+		r.previousLabels.Store(clusterKey, newLabelValue)
+
+		if !shouldContinue {
+			log.Debugf("Skipping reconciliation for UPDATE event - rancher-fip label condition not met for cluster: %s [%s]", cluster.Name, cluster.Spec.DisplayName)
+			return ctrl.Result{}, nil
+		}
+	} else {
+		// This is a CREATE event - store the current label value for future UPDATE comparisons
+		r.previousLabels.Store(clusterKey, cluster.Labels["rancher-fip"])
+	}
+
+	log.Infof("Reconciling cluster: %s [%s]", cluster.Name, cluster.Spec.DisplayName)
 
 	// Retrieve kubeconfig for the downstream cluster by listing all secrets in the fleet-default namespace
 	var secrets corev1.SecretList
@@ -433,9 +477,24 @@ func (r *ClusterProvisioningReconciler) SetupWithManager(mgr ctrl.Manager) error
 				return true
 			},
 			UpdateFunc: func(e event.UpdateEvent) bool {
-				return false
+				// Store the old object's "rancher-fip" label value for comparison in Reconcile
+				oldCluster, ok := e.ObjectOld.(*managementv3.Cluster)
+				if ok {
+					// Use the same key format as in Reconcile (req.NamespacedName.String())
+					clusterKey := types.NamespacedName{Name: oldCluster.Name}.String()
+					oldLabelValue := oldCluster.Labels["rancher-fip"]
+					r.previousLabels.Store(clusterKey, oldLabelValue)
+				}
+				return true
 			},
 			DeleteFunc: func(e event.DeleteEvent) bool {
+				// Clean up stored label value on delete
+				cluster, ok := e.Object.(*managementv3.Cluster)
+				if ok {
+					// Use the same key format as in Reconcile (req.NamespacedName.String())
+					clusterKey := types.NamespacedName{Name: cluster.Name}.String()
+					r.previousLabels.Delete(clusterKey)
+				}
 				return false
 			},
 			GenericFunc: func(e event.GenericEvent) bool {
