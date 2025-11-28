@@ -76,6 +76,14 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
+	// set up logrus logging
+	level, err := logrus.ParseLevel(os.Getenv("LOGLEVEL"))
+	if err != nil {
+		logrus.Warnf("(main) cannot determine loglevel, leaving it on Info")
+	} else {
+		logrus.Infof("(main) setting loglevel to %s", level)
+		logrus.SetLevel(level)
+	}
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})

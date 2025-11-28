@@ -51,7 +51,17 @@ type ClusterProvisioningReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
-func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
+	clusterKey := req.NamespacedName.String()
+
+	// Remove the clusterKey from the previousLabels map if the reconciliation fails or is requeued
+	defer func() {
+		if result.RequeueAfter > 0 {
+			// Delete the clusterKey from the previousLabels map so rancher-fip relabeling will trigger a new reconciliation if the cluster is requeued
+			r.previousLabels.Delete(clusterKey)
+		}
+	}()
+
 	log := logrus.WithFields(logrus.Fields{
 		"controller": "clusterprovisioning",
 		"name":       req.NamespacedName,
@@ -70,11 +80,13 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 		cluster.Labels["rancher-fip"] != "enabled" {
 		log.Debugf("Skipping reconciliation for cluster: %s [%s]", cluster.Name, cluster.Spec.DisplayName)
 
+		// Delete the clusterKey from the previousLabels map so rancher-fip relabeling will trigger a new reconciliation
+		r.previousLabels.Delete(clusterKey)
+
 		return ctrl.Result{}, nil
 	}
 
 	// Check if this is an UPDATE event by checking if we have a previous label value stored
-	clusterKey := req.NamespacedName.String()
 	previousLabelValue, isUpdate := r.previousLabels.Load(clusterKey)
 
 	if isUpdate {
@@ -477,14 +489,6 @@ func (r *ClusterProvisioningReconciler) SetupWithManager(mgr ctrl.Manager) error
 				return true
 			},
 			UpdateFunc: func(e event.UpdateEvent) bool {
-				// Store the old object's "rancher-fip" label value for comparison in Reconcile
-				oldCluster, ok := e.ObjectOld.(*managementv3.Cluster)
-				if ok {
-					// Use the same key format as in Reconcile (req.NamespacedName.String())
-					clusterKey := types.NamespacedName{Name: oldCluster.Name}.String()
-					oldLabelValue := oldCluster.Labels["rancher-fip"]
-					r.previousLabels.Store(clusterKey, oldLabelValue)
-				}
 				return true
 			},
 			DeleteFunc: func(e event.DeleteEvent) bool {
