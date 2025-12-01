@@ -89,7 +89,32 @@ data:
   MetalLBControllerNamespace: "rancher-fip-manager"
   MetalLBControllerValues: |
     controller:
-      # example values
+      image:
+        repository: quay.io/metallb/controller
+        tag: v0.15.2
+      nodeSelector:
+        node-role.kubernetes.io/master: 'true'
+      tolerations: [ { "effect": "NoSchedule", "key":
+      "node-role.kubernetes.io/master", "operator": "Exists" }, { "effect":
+      "NoSchedule", "key": "node-role.kubernetes.io/control-plane", "operator":
+      "Exists" }, { "effect": "NoExecute", "key": "node-role.kubernetes.io/etcd",
+      "operator": "Exists" } ]
+    speaker:
+      image:
+        repository: quay.io/metallb/speaker
+        tag: v0.15.2
+      nodeSelector:
+        node-role.kubernetes.io/master: 'true'
+      tolerations: [ { "effect": "NoSchedule", "key":
+      "node-role.kubernetes.io/master", "operator": "Exists" }, { "effect":
+      "NoSchedule", "key": "node-role.kubernetes.io/control-plane", "operator":
+      "Exists" }, { "effect": "NoExecute", "key": "node-role.kubernetes.io/etcd",
+      "operator": "Exists" } ]
+      frr:
+        image:
+          repository: quay.io/frrouting/frr
+          tag: 9.1.0
+```
 
 ### Optional CA certificates propagation
 
@@ -111,7 +136,7 @@ Only `FloatingIPPool` objects whose `spec.targetCluster` matches the downstream 
     -   clusters labeled `provider.cattle.io=harvester`
     -   clusters without label `rancher-fip=enabled`
 -   `FloatingIPProjectQuota` reacts to create events for `rancher.k8s.binbash.org/v1beta1.FloatingIPProjectQuota` and requires the target cluster to be labeled `rancher-fip=enabled`.
-```
+
 
 # License
 

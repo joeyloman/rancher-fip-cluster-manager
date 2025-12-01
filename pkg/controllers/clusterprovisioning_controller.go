@@ -8,6 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/joeyloman/rancher-fip-cluster-manager/internal/helm"
+	"github.com/joeyloman/rancher-fip-cluster-manager/pkg/config"
+	rbbv1beta1 "github.com/joeyloman/rancher-fip-manager/pkg/apis/rancher.k8s.binbash.org/v1beta1"
 	managementv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	provisioningv1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
 	"github.com/sirupsen/logrus"
@@ -16,15 +19,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
-	"github.com/joeyloman/rancher-fip-cluster-manager/internal/helm"
-	"github.com/joeyloman/rancher-fip-cluster-manager/pkg/config"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"helm.sh/helm/v3/pkg/repo"
 )
@@ -70,8 +70,22 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 	// Fetch the Cluster object
 	var cluster managementv3.Cluster
 	if err := r.Get(ctx, req.NamespacedName, &cluster); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			// Object not found, treat as deleted
+			log.Infof("Cluster %s not found, checking for FloatingIP cleanup", req.Name)
+
+			// Delete the clusterKey from the previousLabels map
+			r.previousLabels.Delete(clusterKey)
+
+			// Run cleanup
+			if err := r.releaseFloatingIPs(ctx, log, req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+
 		log.WithError(err).Error("unable to fetch Cluster")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, err
 	}
 
 	// Filter out clusters that should not be reconciled
@@ -150,7 +164,7 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 
 	if !found {
-		log.Infof("kubeconfig secret not found for cluster %s (tried %s and %s), retrying in 2 minutes", cluster.Name, kubeconfigSecretName, kubeconfigSecretNameWithDisplayName)
+		log.Debugf("kubeconfig secret not found for cluster %s (tried %s and %s), retrying in 2 minutes", cluster.Name, kubeconfigSecretName, kubeconfigSecretNameWithDisplayName)
 		return ctrl.Result{RequeueAfter: 2 * time.Minute}, nil
 	}
 
@@ -461,6 +475,38 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 	return HandleConfigSecrets(ctx, r.Client, downstreamClient, r.Config.RancherFipLBControllerNamespace, &project, projectNamespace, targetNetwork, r.Config.RancherFipApiServerURL, cluster.Name, r.Config.CaCrt)
 }
 
+func (r *ClusterProvisioningReconciler) releaseFloatingIPs(ctx context.Context, log *logrus.Entry, clusterName string) error {
+	logrus.Infof("Checking for floatingips to release for cluster %s", clusterName)
+
+	// Get all FloatingIPs which are assigned to the cluster
+	var fipList rbbv1beta1.FloatingIPList
+	if err := r.List(ctx, &fipList); err != nil {
+		log.WithError(err).Error("unable to list floatingips")
+		return err
+	}
+
+	for _, fip := range fipList.Items {
+		// compare the clustername with the floatingip object rancher.k8s.binbash.org/cluster-name label
+		if fip.Labels["rancher.k8s.binbash.org/cluster-name"] == clusterName {
+			fipToUpdate := fip.DeepCopy()
+
+			delete(fipToUpdate.Labels, "rancher.k8s.binbash.org/cluster-name")
+			delete(fipToUpdate.Labels, "rancher.k8s.binbash.org/service-name")
+			delete(fipToUpdate.Labels, "rancher.k8s.binbash.org/service-namespace")
+
+			// the status assigned and conditions will be updated by the rancher-fip-manager controller
+
+			if err := r.Update(ctx, fipToUpdate); err != nil {
+				log.Errorf("failed to update floatingip: %s", err.Error())
+				return err
+			}
+			log.Infof("Released FloatingIP %s for deleted cluster %s", fip.Name, clusterName)
+		}
+	}
+
+	return nil
+}
+
 func (r *ClusterProvisioningReconciler) createChartSpec(name, ref, version, namespace, values string) helm.ChartSpec {
 	spec := helm.ChartSpec{
 		ChartName:   name,
@@ -492,14 +538,7 @@ func (r *ClusterProvisioningReconciler) SetupWithManager(mgr ctrl.Manager) error
 				return true
 			},
 			DeleteFunc: func(e event.DeleteEvent) bool {
-				// Clean up stored label value on delete
-				cluster, ok := e.Object.(*managementv3.Cluster)
-				if ok {
-					// Use the same key format as in Reconcile (req.NamespacedName.String())
-					clusterKey := types.NamespacedName{Name: cluster.Name}.String()
-					r.previousLabels.Delete(clusterKey)
-				}
-				return false
+				return true
 			},
 			GenericFunc: func(e event.GenericEvent) bool {
 				return false

@@ -29,6 +29,15 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - rancher.k8s.binbash.org
+  resources:
+  - floatingips
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
   - provisioning.cattle.io
   resources:
   - clusters
