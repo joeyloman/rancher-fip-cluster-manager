@@ -77,12 +77,12 @@ data:
   RancherFipApiServerURL: "http://rancher-fip-api.example.com"
   RancherFipLBControllerChartName: "rancher-fip-lb-controller"
   RancherFipLBControllerChartRef: "oci://registry.example.com/projectname/rancher-fip-lb-controller"
-  RancherFipLBControllerChartVersion: "0.1.0"
+  RancherFipLBControllerChartVersion: "0.2.0"
   RancherFipLBControllerNamespace: "rancher-fip-manager"
   RancherFipLBControllerValues: |
     image:
       repository: registry.example.com/rancher/rancher-fip-lb-controller
-      tag: v0.1.0
+      tag: v0.2.0
   MetalLBControllerChartName: "metallb"
   MetalLBControllerChartRef: "https://metallb.github.io/metallb"
   MetalLBControllerChartVersion: "0.15.2"
