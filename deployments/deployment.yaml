@@ -153,7 +153,7 @@ data:
         repository: quay.io/metallb/controller
         tag: v0.15.2
       nodeSelector:
-        node-role.kubernetes.io/master: 'true'
+        node-role.kubernetes.io/control-plane: 'true'
       tolerations: [ { "effect": "NoSchedule", "key":
       "node-role.kubernetes.io/master", "operator": "Exists" }, { "effect":
       "NoSchedule", "key": "node-role.kubernetes.io/control-plane", "operator":
@@ -164,7 +164,7 @@ data:
         repository: quay.io/metallb/speaker
         tag: v0.15.2
       nodeSelector:
-        node-role.kubernetes.io/master: 'true'
+        node-role.kubernetes.io/control-plane: 'true'
       tolerations: [ { "effect": "NoSchedule", "key":
       "node-role.kubernetes.io/master", "operator": "Exists" }, { "effect":
       "NoSchedule", "key": "node-role.kubernetes.io/control-plane", "operator":
