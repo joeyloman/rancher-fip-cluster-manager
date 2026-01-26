@@ -230,34 +230,97 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 	}
 
-	// Check if the r.Config.MetalLBControllerNamespace exists in the downstream cluster, if not create it
-	if err := EnsureNamespace(ctx, downstreamClient, r.Config.MetalLBControllerNamespace); err != nil {
-		log.WithError(err).Error("failed to ensure metallb-controller namespace")
-		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+	// Determine the load balancer type from the cluster label
+	loadBalancerType := "purelb"
+	if cluster.Labels["rancher-fip-lbtype"] == "metallb" {
+		loadBalancerType = "metallb"
 	}
 
-	// Install MetalLB
-	if strings.HasPrefix(r.Config.MetalLBControllerChartRef, "https://") || strings.HasPrefix(r.Config.MetalLBControllerChartRef, "http://") {
-		chartRepo := repo.Entry{
-			Name: r.Config.MetalLBControllerChartName,
-			URL:  r.Config.MetalLBControllerChartRef,
-		}
-		if err := r.HelmClient.AddOrUpdateChartRepo(chartRepo); err != nil {
-			log.WithError(err).Error("unable to add or update metallb chart repo")
+	log.Debugf("loadBalancerType %s detected for cluster %s [%s]", loadBalancerType, cluster.Name, cluster.Spec.DisplayName)
+
+	if loadBalancerType == "purelb" {
+		chartInstalled, err := r.HelmClient.CheckIfChartIsInstalled(ctx, downstreamConfig, r.Config.MetalLBControllerChartName, r.Config.MetalLBControllerNamespace)
+		if err != nil {
+			log.WithError(err).Error("unable to check if metallb chart is installed")
 			return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 		}
+		if chartInstalled {
+			log.Errorf("load balancer type is set to purelb, but metallb is already installed, skipping reconciliation")
+			return ctrl.Result{}, nil
+		}
+	} else if loadBalancerType == "metallb" {
+		chartInstalled, err := r.HelmClient.CheckIfChartIsInstalled(ctx, downstreamConfig, r.Config.PureLBControllerChartName, r.Config.PureLBControllerNamespace)
+		if err != nil {
+			log.WithError(err).Error("unable to check if purelb chart is installed")
+			return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		}
+		if chartInstalled {
+			log.Errorf("load balancer type is set to metallb, but purelb is already installed, skipping reconciliation")
+			return ctrl.Result{}, nil
+		}
 	}
-	metalLBChartSpec := r.createChartSpec(
-		r.Config.MetalLBControllerChartName,
-		r.Config.MetalLBControllerChartRef,
-		r.Config.MetalLBControllerChartVersion,
-		r.Config.MetalLBControllerNamespace,
-		r.Config.MetalLBControllerValues,
-	)
 
-	if err := r.HelmClient.InstallOrUpgrade(ctx, downstreamConfig, metalLBChartSpec); err != nil {
-		log.WithError(err).Error("unable to install metallb chart")
-		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+	if loadBalancerType == "metallb" {
+		// Check if the r.Config.MetalLBControllerNamespace exists in the downstream cluster, if not create it
+		if err := EnsureNamespace(ctx, downstreamClient, r.Config.MetalLBControllerNamespace); err != nil {
+			log.WithError(err).Error("failed to ensure metallb-controller namespace")
+			return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		}
+
+		// Install MetalLB
+		if strings.HasPrefix(r.Config.MetalLBControllerChartRef, "https://") || strings.HasPrefix(r.Config.MetalLBControllerChartRef, "http://") {
+			chartRepo := repo.Entry{
+				Name: r.Config.MetalLBControllerChartName,
+				URL:  r.Config.MetalLBControllerChartRef,
+			}
+			if err := r.HelmClient.AddOrUpdateChartRepo(chartRepo); err != nil {
+				log.WithError(err).Error("unable to add or update metallb chart repo")
+				return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+			}
+		}
+		metalLBChartSpec := r.createChartSpec(
+			r.Config.MetalLBControllerChartName,
+			r.Config.MetalLBControllerChartRef,
+			r.Config.MetalLBControllerChartVersion,
+			r.Config.MetalLBControllerNamespace,
+			r.Config.MetalLBControllerValues,
+		)
+
+		if err := r.HelmClient.InstallOrUpgrade(ctx, downstreamConfig, metalLBChartSpec); err != nil {
+			log.WithError(err).Error("unable to install metallb chart")
+			return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		}
+	} else {
+		// If no rancher0fip-lbtype is set, PureLB is the default LB controller, so we need to install it
+		// Check if the r.Config.PureLBControllerNamespace exists in the downstream cluster, if not create it
+		if err := EnsureNamespace(ctx, downstreamClient, r.Config.PureLBControllerNamespace); err != nil {
+			log.WithError(err).Error("failed to ensure pure-controller namespace")
+			return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		}
+
+		// Install PureLB
+		if strings.HasPrefix(r.Config.PureLBControllerChartRef, "https://") || strings.HasPrefix(r.Config.PureLBControllerChartRef, "http://") {
+			chartRepo := repo.Entry{
+				Name: r.Config.PureLBControllerChartName,
+				URL:  r.Config.PureLBControllerChartRef,
+			}
+			if err := r.HelmClient.AddOrUpdateChartRepo(chartRepo); err != nil {
+				log.WithError(err).Error("unable to add or update purelb chart repo")
+				return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+			}
+		}
+		pureLBChartSpec := r.createChartSpec(
+			r.Config.PureLBControllerChartName,
+			r.Config.PureLBControllerChartRef,
+			r.Config.PureLBControllerChartVersion,
+			r.Config.PureLBControllerNamespace,
+			r.Config.PureLBControllerValues,
+		)
+
+		if err := r.HelmClient.InstallOrUpgrade(ctx, downstreamConfig, pureLBChartSpec); err != nil {
+			log.WithError(err).Error("unable to install purelb chart")
+			return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		}
 	}
 
 	// Get the provisioningv1 cluster object by matching them with the cluster.name or cluster.spec.displayname
@@ -472,7 +535,18 @@ func (r *ClusterProvisioningReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 	}
 
-	return HandleConfigSecrets(ctx, r.Client, downstreamClient, r.Config.RancherFipLBControllerNamespace, &project, projectNamespace, targetNetwork, r.Config.RancherFipApiServerURL, cluster.Name, r.Config.CaCrt)
+	return HandleConfigSecrets(
+		ctx, r.Client,
+		downstreamClient,
+		r.Config.RancherFipLBControllerNamespace,
+		&project,
+		projectNamespace,
+		targetNetwork,
+		r.Config.RancherFipApiServerURL,
+		cluster.Name,
+		loadBalancerType,
+		r.Config.CaCrt,
+	)
 }
 
 func (r *ClusterProvisioningReconciler) releaseFloatingIPs(ctx context.Context, log *logrus.Entry, clusterName string) error {

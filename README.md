@@ -83,15 +83,38 @@ data:
     image:
       repository: registry.example.com/rancher/rancher-fip-lb-controller
       tag: v0.2.0
+  PureLBControllerChartName: "purelb"
+  PureLBControllerChartRef: "https://gitlab.com/api/v4/projects/20400619/packages/helm/stable"
+  PureLBControllerChartVersion: "0.13.0"
+  PureLBControllerNamespace: "rancher-fip-manager"
+  PureLBControllerValues: |
+    image:
+      repository: registry.gitlab.com/purelb/purelb
+      tag: v0.13.0
+    lbnodeagent:
+      sendgarp: true
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: 'true'
+      tolerations: [ { "effect": "NoSchedule", "key":
+      "node-role.kubernetes.io/master", "operator": "Exists" }, { "effect":
+      "NoSchedule", "key": "node-role.kubernetes.io/control-plane", "operator":
+      "Exists" }, { "effect": "NoExecute", "key": "node-role.kubernetes.io/etcd",
+      "operator": "Exists" } ]
+    allocator:
+      tolerations: [ { "effect": "NoSchedule", "key":
+      "node-role.kubernetes.io/master", "operator": "Exists" }, { "effect":
+      "NoSchedule", "key": "node-role.kubernetes.io/control-plane", "operator":
+      "Exists" }, { "effect": "NoExecute", "key": "node-role.kubernetes.io/etcd",
+      "operator": "Exists" } ]  
   MetalLBControllerChartName: "metallb"
   MetalLBControllerChartRef: "https://metallb.github.io/metallb"
-  MetalLBControllerChartVersion: "0.15.2"
+  MetalLBControllerChartVersion: "0.15.3"
   MetalLBControllerNamespace: "rancher-fip-manager"
   MetalLBControllerValues: |
     controller:
       image:
         repository: quay.io/metallb/controller
-        tag: v0.15.2
+        tag: v0.15.3
       nodeSelector:
         node-role.kubernetes.io/master: 'true'
       tolerations: [ { "effect": "NoSchedule", "key":
@@ -113,7 +136,7 @@ data:
       frr:
         image:
           repository: quay.io/frrouting/frr
-          tag: 9.1.0
+          tag: 10.4.1
 ```
 
 ### Optional CA certificates propagation
@@ -137,10 +160,19 @@ Only `FloatingIPPool` objects whose `spec.targetCluster` matches the downstream 
     -   clusters without label `rancher-fip=enabled`
 -   `FloatingIPProjectQuota` reacts to create events for `rancher.k8s.binbash.org/v1beta1.FloatingIPProjectQuota` and requires the target cluster to be labeled `rancher-fip=enabled`.
 
+### Load Balancer Type Selection
+
+The controller supports two load balancer implementations: PureLB (default) and MetalLB. The load balancer type is determined by the `rancher-fip-lbtype` label on the cluster resource:
+
+-   **Default behavior**: If the `rancher-fip-lbtype` label is not set or has any value other than `metallb`, the controller will deploy **PureLB** as the load balancer controller.
+-   **MetalLB selection**: If the cluster is labeled with `rancher-fip-lbtype=metallb`, the controller will deploy **MetalLB** instead.
+
+The `loadBalancerType` value (either `purelb` or `metallb`) is stored in the secrets created for downstream clusters, allowing other components to be aware of which load balancer implementation is in use. The controller includes validation logic to prevent conflicting installations: if a cluster is configured for one load balancer type but the other is already installed, reconciliation will be skipped to avoid conflicts.
+
 
 # License
 
-Copyright (c) 2025 Joey Loman <joey@binbash.org>
+Copyright (c) 2026 Joey Loman <joey@binbash.org>
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

@@ -82,9 +82,27 @@ func (r *FloatingIPProjectQuotaReconciler) Reconcile(ctx context.Context, req ct
 
 	log.Infof("Downstream cluster found: %s [%s], processing...", cluster.Name, cluster.Spec.DisplayName)
 
+	// Determine the load balancer type from the cluster label
+	loadBalancerType := "purelb"
+	if cluster.Labels["rancher-fip-lbtype"] == "metallb" {
+		loadBalancerType = "metallb"
+	}
+
 	// If the downstream cluster is a Harvester cluster only create the secret in the local cluster
 	if cluster.Labels["provider.cattle.io"] == "harvester" {
-		return HandleConfigSecrets(ctx, r.Client, nil, r.Config.RancherFipLBControllerNamespace, &project, projectNamespace, "harvester", r.Config.RancherFipApiServerURL, cluster.Name, r.Config.CaCrt)
+		return HandleConfigSecrets(
+			ctx,
+			r.Client,
+			nil,
+			r.Config.RancherFipLBControllerNamespace,
+			&project,
+			projectNamespace,
+			"harvester",
+			r.Config.RancherFipApiServerURL,
+			cluster.Name,
+			loadBalancerType,
+			r.Config.CaCrt,
+		)
 	}
 
 	// Check if Rancher FIP is enabled for the downstream cluster
@@ -189,7 +207,19 @@ func (r *FloatingIPProjectQuotaReconciler) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 	}
 
-	return HandleConfigSecrets(ctx, r.Client, downstreamClient, r.Config.RancherFipLBControllerNamespace, &project, projectNamespace, targetNetwork, r.Config.RancherFipApiServerURL, cluster.Name, r.Config.CaCrt)
+	return HandleConfigSecrets(
+		ctx,
+		r.Client,
+		downstreamClient,
+		r.Config.RancherFipLBControllerNamespace,
+		&project,
+		projectNamespace,
+		targetNetwork,
+		r.Config.RancherFipApiServerURL,
+		cluster.Name,
+		loadBalancerType,
+		r.Config.CaCrt,
+	)
 }
 
 // SetupWithManager sets up the controller with the Manager.

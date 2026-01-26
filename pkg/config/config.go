@@ -8,6 +8,11 @@ type Config struct {
 	RancherFipLBControllerChartVersion string
 	RancherFipLBControllerNamespace    string
 	RancherFipLBControllerValues       string
+	PureLBControllerChartName          string
+	PureLBControllerChartRef           string
+	PureLBControllerChartVersion       string
+	PureLBControllerNamespace          string
+	PureLBControllerValues             string
 	MetalLBControllerChartName         string
 	MetalLBControllerChartRef          string
 	MetalLBControllerChartVersion      string

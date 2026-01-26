@@ -16,7 +16,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func HandleConfigSecrets(ctx context.Context, localClient client.Client, downstreamClient client.Client, targetNamespace string, project *v3.Project, projectNamespace string, targetNetwork string, rancherFipApiServerURL string, cluster string, caCrt []byte) (ctrl.Result, error) {
+func HandleConfigSecrets(
+	ctx context.Context,
+	localClient client.Client,
+	downstreamClient client.Client,
+	targetNamespace string,
+	project *v3.Project,
+	projectNamespace string,
+	targetNetwork string,
+	rancherFipApiServerURL string,
+	cluster string,
+	loadBalancerType string,
+	caCrt []byte,
+) (ctrl.Result, error) {
 	projectID := project.Name
 	secretName := fmt.Sprintf("rancher-fip-config-%s", projectID)
 	var secretExists bool = false
@@ -114,7 +126,7 @@ func HandleConfigSecrets(ctx context.Context, localClient client.Client, downstr
 	if err := downstreamClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: targetNamespace}, &existingDownstreamSecret); err != nil {
 		if errors.IsNotFound(err) {
 			log.Infof("Secret %s does not exist in the downstream cluster, creating it", secretName)
-			downstreamSecret := secret.NewDownstreamSecret(secretName, targetNamespace, rancherFipApiServerURL, clientSecret, cluster, projectID, targetNetwork)
+			downstreamSecret := secret.NewDownstreamSecret(secretName, targetNamespace, rancherFipApiServerURL, clientSecret, cluster, projectID, targetNetwork, loadBalancerType)
 			if err := downstreamClient.Create(ctx, downstreamSecret); err != nil {
 				log.WithError(err).Error("unable to create secret in downstream cluster")
 				return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil

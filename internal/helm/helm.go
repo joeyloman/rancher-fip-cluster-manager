@@ -42,6 +42,8 @@ type Interface interface {
 	// InstallOrUpgrade installs a Helm chart if it's not already present, or upgrades it if it is.
 	InstallOrUpgrade(ctx context.Context, config *rest.Config, spec ChartSpec) error
 	AddOrUpdateChartRepo(repo repo.Entry) error
+	// CheckIfChartIsInstalled checks if a Helm chart is installed in the specified namespace. Returns true if installed, false if not found, and an error if something goes wrong.
+	CheckIfChartIsInstalled(ctx context.Context, config *rest.Config, releaseName, namespace string) (bool, error)
 }
 
 // Client is a Helm client that implements the Interface.
@@ -199,6 +201,40 @@ func (c *Client) AddOrUpdateChartRepo(entry repo.Entry) error {
 	log.Printf("Successfully got an update from the %q chart repository", entry.Name)
 
 	return nil
+}
+
+// CheckIfChartIsInstalled checks if a Helm chart release is installed in the specified namespace.
+// Returns true if the chart is installed, false if the chart is not found, and an error if something goes wrong.
+func (c *Client) CheckIfChartIsInstalled(ctx context.Context, config *rest.Config, releaseName, namespace string) (bool, error) {
+	// Validate that release name is not empty
+	if releaseName == "" {
+		return false, errors.New("release name cannot be empty")
+	}
+
+	// Validate that namespace is not empty
+	if namespace == "" {
+		return false, errors.New("namespace cannot be empty")
+	}
+
+	actionConfig := new(action.Configuration)
+
+	// Initialize action config with the namespace where the release should be installed
+	if err := actionConfig.Init(newRESTClientGetter(config, namespace), namespace, "secret", log.Printf); err != nil {
+		return false, errors.Wrapf(err, "failed to initialize action config for checking release %q in namespace %q", releaseName, namespace)
+	}
+
+	historyClient := action.NewHistory(actionConfig)
+	historyClient.Max = 1
+	_, err := historyClient.Run(releaseName)
+	if err == driver.ErrReleaseNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to check if release %q is installed in namespace %q", releaseName, namespace)
+	}
+
+	log.Printf("Release %q is installed in namespace %q.", releaseName, namespace)
+	return true, nil
 }
 
 // restClientGetter is a simple implementation of genericclioptions.RESTClientGetter.

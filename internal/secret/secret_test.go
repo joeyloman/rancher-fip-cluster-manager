@@ -20,8 +20,9 @@ func TestNewSecret(t *testing.T) {
 	cluster := "test-cluster"
 	project := "test-project"
 	floatingIPPool := "test-floatingIPPool"
+	loadBalancerType := "purelb"
 
-	secret := NewDownstreamSecret(name, namespace, apiUrl, clientSecret, cluster, project, floatingIPPool)
+	secret := NewDownstreamSecret(name, namespace, apiUrl, clientSecret, cluster, project, floatingIPPool, loadBalancerType)
 
 	assert.Equal(t, name, secret.Name)
 	assert.Equal(t, namespace, secret.Namespace)
@@ -30,6 +31,7 @@ func TestNewSecret(t *testing.T) {
 	assert.Equal(t, []byte(cluster), secret.Data["cluster"])
 	assert.Equal(t, []byte(project), secret.Data["project"])
 	assert.Equal(t, []byte(floatingIPPool), secret.Data["floatingIPPool"])
+	assert.Equal(t, []byte(loadBalancerType), secret.Data["loadBalancerType"])
 }
 
 func TestNewLocalSecret(t *testing.T) {
